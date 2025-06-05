@@ -359,12 +359,71 @@ async function getAIResponse(character, history, userMessage) {
     { role: 'user', content: userMessage }
   ]
 
-  // Ajouter une instruction pour forcer la création de plusieurs messages courts
-  const forceSplitPrompt = Math.random() > 0.3 ? 
-    "Réponds avec 2-3 messages courts séparés par une ligne vide (\\n\\n). Chaque message doit être très court (30-60 caractères maximum)." : 
-    "Réponds avec un message court (maximum 60 caractères).";
+  // Déterminer de façon plus naturelle le nombre de messages à envoyer
+  // Basé sur le contexte de la conversation et l'humeur du personnage
+  let messageStyle = "";
   
-  messages.push({ role: 'system', content: forceSplitPrompt });
+  // Facteurs qui influencent le style de réponse
+  const isQuestion = userMessage.includes('?');
+  const isShortMessage = userMessage.length < 40;
+  const isEmotionalTopic = /sentiment|émotion|triste|heureux|content|aimer|détester|penser/.test(userMessage.toLowerCase());
+  const isGreeting = /salut|bonjour|coucou|hey|hello|bonsoir|ça va|comment vas-tu/.test(userMessage.toLowerCase());
+  const isEnding = /bye|au revoir|à plus|à bientôt|bonne journée|bonne soirée|bonne nuit/.test(userMessage.toLowerCase());
+  const isStoryRequest = /raconte|histoire|anecdote|souvenir|passé|expérience|voyage/.test(userMessage.toLowerCase());
+  const isOpinionRequest = /pense|avis|opinion|idée|point de vue|ressens|sentiment/.test(userMessage.toLowerCase());
+  const isComplexTopic = /philosophie|art|culture|politique|société|littérature|musique|cinéma|science/.test(userMessage.toLowerCase());
+  
+  // Probabilités variables selon le contexte
+  let multiMessageProb = 0.5; // Probabilité de base pour messages multiples
+  let longMessageProb = 0.1; // Probabilité de base pour un message long
+  
+  // Ajuster selon le contexte
+  if (isQuestion) multiMessageProb -= 0.2; // Questions = souvent une seule réponse
+  if (isShortMessage) multiMessageProb += 0.1; // Messages courts = plus de chance de réponses multiples
+  if (isEmotionalTopic) multiMessageProb += 0.2; // Sujets émotionnels = plus de messages
+  if (isGreeting) multiMessageProb -= 0.3; // Salutations = généralement un seul message
+  if (isEnding) multiMessageProb -= 0.4; // Au revoir = généralement un seul message
+  
+  // Facteurs qui favorisent un message long
+  if (isStoryRequest) longMessageProb += 0.5; // Demande d'histoire = message plus long
+  if (isOpinionRequest) longMessageProb += 0.3; // Demande d'opinion = message plus long
+  if (isComplexTopic) longMessageProb += 0.4; // Sujet complexe = message plus long
+  if (userMessage.length > 100) longMessageProb += 0.2; // Message long de l'utilisateur = réponse plus longue
+  
+  // Ajuster selon l'humeur
+  if (dominantMood === "enthousiaste") {
+    multiMessageProb += 0.2;
+    longMessageProb += 0.1;
+  }
+  if (dominantMood === "fatigué") {
+    multiMessageProb -= 0.2;
+    longMessageProb -= 0.1;
+  }
+  
+  // Limiter les probabilités entre 0 et 1
+  multiMessageProb = Math.max(0, Math.min(1, multiMessageProb));
+  longMessageProb = Math.max(0, Math.min(1, longMessageProb));
+  
+  // Décider du style de réponse
+  const randomValue = Math.random();
+  
+  // Décider si on envoie un message long (à des moments opportuns)
+  if (randomValue < longMessageProb) {
+    // Message plus long et plus élaboré
+    messageStyle = "Réponds avec un message plus élaboré (100-150 caractères). Exprime-toi de façon naturelle, comme dans une vraie conversation par SMS.";
+  } 
+  // Sinon, décider si on envoie plusieurs messages courts
+  else if (randomValue < longMessageProb + multiMessageProb) {
+    // Décider du nombre de messages (1, 2 ou 3)
+    const messageCount = Math.random() < 0.7 ? 2 : 3; // 70% de chance pour 2 messages, 30% pour 3
+    messageStyle = `Réponds avec ${messageCount} messages courts séparés par une ligne vide (\\n\\n). Chaque message doit être très court (30-60 caractères maximum).`;
+  } 
+  // Sinon, un seul message court
+  else {
+    messageStyle = "Réponds avec un seul message court (maximum 60 caractères).";
+  }
+  
+  messages.push({ role: 'system', content: messageStyle });
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -408,11 +467,18 @@ async function getAIResponse(character, history, userMessage) {
     }
   }
   
-  // Limiter à 3 messages maximum pour éviter les conversations trop longues
-  return responses.slice(0, 3)
+  // Limiter le nombre de messages de façon dynamique
+  // Si on a plus de 3 messages, on en garde un nombre aléatoire entre 1 et 3
+  if (responses.length > 3) {
+    // Déterminer combien de messages garder (1, 2 ou 3)
+    const keepCount = Math.floor(Math.random() * 3) + 1;
+    return responses.slice(0, keepCount);
+  }
+  
+  return responses;
 }
 
-function getVoiceSettings(text) {
+function getVoiceSettings(text, characterId) {
   let settings = {
     stability: 0.5,
     similarity_boost: 0.75,
@@ -500,14 +566,14 @@ function getVoiceSettings(text) {
   }
 
   // Ajustements spécifiques pour Mael (plus posé et intellectuel)
-  if (selectedContact?.id === 'mael') {
+  if (characterId === 'mael') {
     settings.stability = Math.min(settings.stability + 0.1, 0.8)
     settings.style = Math.max(settings.style - 0.05, 0.05)
     settings.similarity_boost = Math.min(settings.similarity_boost + 0.05, 0.9)
   }
 
   // Ajustements spécifiques pour Sacha (plus expressif et chaleureux)
-  if (selectedContact?.id === 'sacha') {
+  if (characterId === 'sacha') {
     settings.stability = Math.max(settings.stability - 0.05, 0.3)
     settings.style = Math.min(settings.style + 0.05, 0.5)
     settings.similarity_boost = Math.max(settings.similarity_boost - 0.05, 0.7)
@@ -517,7 +583,7 @@ function getVoiceSettings(text) {
 }
 
 async function getVoice(text, characterId) {
-  const voice_settings = getVoiceSettings(text)
+  const voice_settings = getVoiceSettings(text, characterId)
   const voiceId = characterId === 'sacha' ? SACHA_VOICE_ID : MAEL_VOICE_ID
   const apiKey = characterId === 'sacha' ? ELEVENLABS_API_KEY : ELEVENLABS_API_KEY_MAEL
   
